@@ -33,6 +33,19 @@ def fetch_reports(user_id):
     return reports
 
 def generate_docx(user_fullname, reports):
+    from datetime import datetime, timedelta, timezone
+
+    # --- Philippine timezone ---
+    PH_TZ = timezone(timedelta(hours=8))
+
+    # Yesterday in PH time
+    today_ph = datetime.now(PH_TZ)
+    yesterday_ph = today_ph - timedelta(days=1)
+
+    day = yesterday_ph.strftime("%d")
+    month = yesterday_ph.strftime("%B")
+    year = yesterday_ph.strftime("%Y")
+
     doc = Document(TEMPLATE_DOCX)
     table = doc.tables[0]
 
@@ -45,12 +58,10 @@ def generate_docx(user_fullname, reports):
     run.font.size = Pt(13)
 
     # DISPOSITION Header
-    today = datetime.today()
-    day = today.strftime("%d")
-    month = today.strftime("%B")
-    year = today.strftime("%Y")
     cell = table.cell(1, 1)
-    cell.text = ""
+    cell.text = ""  # clear existing paragraphs
+
+    # DISPOSITION text
     para1 = cell.paragraphs[0]
     para1.text = "DISPOSITION"
     run1 = para1.runs[0]
@@ -58,6 +69,8 @@ def generate_docx(user_fullname, reports):
     run1.font.bold = True
     run1.font.size = Pt(16)
     para1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Covered Period
     para2 = cell.add_paragraph(f"(Covered Period:{day}0800 – 2000 {month} {year})")
     run2 = para2.runs[0]
     run2.font.name = "Arial"
@@ -65,6 +78,7 @@ def generate_docx(user_fullname, reports):
     run2.font.italic = True
     run2.font.size = Pt(13)
     para2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Reports
@@ -98,6 +112,7 @@ def generate_docx(user_fullname, reports):
             para.paragraph_format.space_before = 0
             para.paragraph_format.space_after = 0
 
+    # Filepath using yesterday's date
     filepath = f"DISPOSITION_{day}_{month}_{year}_{user_fullname.split()[0]}.docx"
     doc.save(filepath)
     return filepath
