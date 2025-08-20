@@ -1,0 +1,2 @@
+[tool.nixpacks]
+python = "3.11"
