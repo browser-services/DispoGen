@@ -11,7 +11,7 @@ from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import qn
 
 # --- CONFIG ---
-TELEGRAM_TOKEN = "8111798247:AAGiT0m7fWwSUWU-jTiKpt1FVvdnf4JBXwc"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DB_PATH = "users_reports.db"
 TEMPLATE_DOCX = "template.docx"
 
