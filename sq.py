@@ -37,7 +37,7 @@ cur.execute("""
             ("Nelson Anzano Oligario"),
             ("Kerwin Ray Abalos"),
             ("Camille Gutierrez Gong"),
-            ("Ethan Aguinaldo"),
+            ("Ethan Cabañero Aguinaldo"),
             ("Ernest Bustamante Aquino"),
             ("Mico Mendoza")
             """)
