@@ -1,19 +1,27 @@
 import random
-from datetime import datetime
 import sqlite3
 import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, filters
+)
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.ns import qn
+from datetime import datetime, timedelta, timezone
+
 
 # --- CONFIG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 DB_PATH = "users_reports.db"
 TEMPLATE_DOCX = "template.docx"
+
+# Philippine timezone
+PH_TZ = timezone(timedelta(hours=8))
+
 
 # --- Helper Functions ---
 def fetch_users():
@@ -32,19 +40,12 @@ def fetch_reports(user_id):
     conn.close()
     return reports
 
-def generate_docx(user_fullname, reports):
-    from datetime import datetime, timedelta, timezone
 
-    # --- Philippine timezone ---
-    PH_TZ = timezone(timedelta(hours=8))
-
-    # Yesterday in PH time
-    today_ph = datetime.now(PH_TZ)
-    yesterday_ph = today_ph - timedelta(days=1)
-
-    day = yesterday_ph.strftime("%d")
-    month = yesterday_ph.strftime("%B")
-    year = yesterday_ph.strftime("%Y")
+def generate_docx(user_fullname, reports, report_date):
+    """Generate report for a given PH-based date (today or yesterday)."""
+    day = report_date.strftime("%d")
+    month = report_date.strftime("%B")
+    year = report_date.strftime("%Y")
 
     doc = Document(TEMPLATE_DOCX)
     table = doc.tables[0]
@@ -59,9 +60,7 @@ def generate_docx(user_fullname, reports):
 
     # DISPOSITION Header
     cell = table.cell(1, 1)
-    cell.text = ""  # clear existing paragraphs
-
-    # DISPOSITION text
+    cell.text = ""  # clear existing
     para1 = cell.paragraphs[0]
     para1.text = "DISPOSITION"
     run1 = para1.runs[0]
@@ -78,7 +77,6 @@ def generate_docx(user_fullname, reports):
     run2.font.italic = True
     run2.font.size = Pt(13)
     para2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
     cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Reports
@@ -112,10 +110,11 @@ def generate_docx(user_fullname, reports):
             para.paragraph_format.space_before = 0
             para.paragraph_format.space_after = 0
 
-    # Filepath using yesterday's date
+    # Filepath
     filepath = f"DISPOSITION_{day}_{month}_{year}_{user_fullname.split()[0]}.docx"
     doc.save(filepath)
     return filepath
+
 
 # --- Safe send/edit ---
 async def safe_send(bot, chat_id, text, reply_markup=None):
@@ -138,6 +137,7 @@ def get_chat_id(update_or_query):
     else:
         return None
 
+
 # --- Menu ---
 async def show_menu(update_or_query, context):
     keyboard = [
@@ -154,9 +154,11 @@ async def show_menu(update_or_query, context):
         msg_id = update_or_query.callback_query.message.message_id
         await safe_edit(context.bot, chat_id, msg_id, "Select an option:", reply_markup=reply_markup)
 
+
 # --- Start ---
 async def start(update, context):
     await show_menu(update, context)
+
 
 # --- Menu Callback ---
 async def menu_callback(update, context):
@@ -205,7 +207,8 @@ async def view_user_options(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await safe_edit(context.bot, query.message.chat.id, query.message.message_id, msg, reply_markup=reply_markup)
 
-# --- Generate Report ---
+
+# --- Generate Report Flow ---
 async def generate_report_start(update, context):
     users = fetch_users()
     keyboard = [[InlineKeyboardButton(u[1], callback_data=f"report_{u[0]}")] for u in users]
@@ -217,24 +220,50 @@ async def report_user_selected(update, context):
     query = update.callback_query
     await query.answer()
     user_id = int(query.data.split("_")[1])
+    context.user_data["report_user_id"] = user_id
+
+    # Ask if Today or Yesterday
+    keyboard = [
+        [InlineKeyboardButton("Today", callback_data="date_today"),
+         InlineKeyboardButton("Yesterday", callback_data="date_yesterday")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await safe_edit(context.bot, query.message.chat.id, query.message.message_id,
+                    "Generate report for Today or Yesterday?", reply_markup=reply_markup)
+
+async def report_date_selected(update, context):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    user_id = context.user_data.get("report_user_id")
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT full_name FROM Users WHERE id=?", (user_id,))
     user_fullname = cur.fetchone()[0]
     conn.close()
+
     reports = fetch_reports(user_id)
     if not reports:
         await safe_edit(context.bot, query.message.chat.id, query.message.message_id,
                         f"No reports found for {user_fullname}.")
         await show_menu(query, context)
         return
-    filepath = generate_docx(user_fullname, reports)
+
+    now_ph = datetime.now(PH_TZ)
+    if choice == "date_today":
+        report_date = now_ph.date()
+    else:
+        report_date = (now_ph - timedelta(days=1)).date()
+
+    filepath = generate_docx(user_fullname, reports, report_date)
     with open(filepath, "rb") as f:
         await context.bot.send_document(chat_id=query.message.chat.id, document=f, filename=filepath)
     os.remove(filepath)
     await safe_edit(context.bot, query.message.chat.id, query.message.message_id,
                     f"Report generated for {user_fullname}.")
     await show_menu(query, context)
+
 
 # --- Add / Remove Activity ---
 async def activity_user_selected(update, context):
@@ -290,12 +319,14 @@ async def handle_activity_message(update, context):
     context.user_data.pop("user_id", None)
     await show_menu(update, context)
 
+
 # --- Main ---
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu_"))
 app.add_handler(CallbackQueryHandler(report_user_selected, pattern="^report_"))
+app.add_handler(CallbackQueryHandler(report_date_selected, pattern="^date_"))
 app.add_handler(CallbackQueryHandler(activity_user_selected, pattern="^(add_|remove_)"))
 app.add_handler(CallbackQueryHandler(view_user_options, pattern="^view_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_activity_message))
